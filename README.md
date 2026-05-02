@@ -136,7 +136,7 @@ bank-marketing-customer-prediction-ml/
 2. Open the HTML file directly in your browser:
 
 ```id="k29x8q"
-open "Bankmarketing prediction.html"
+open "https://priyaneiyah-12.github.io/bank-marketing-customer-prediction-ml/"
 ```
 
 or simply double-click the file
