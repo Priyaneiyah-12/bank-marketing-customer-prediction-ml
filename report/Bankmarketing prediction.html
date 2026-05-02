@@ -1,0 +1,313 @@
+Project title: Term Deposit Subscription Prediction for Telemarketing Campaigns
+1. Company Background:
+This project analyses on a Portuguese bank that markets term deposits through telemarketing campaigns. As reaching out to customers one by one incurs expenses, it is crucial to enhance targeting. Only about 11–12% of clients subscribe, indicating that most calls do not yield value.The goal is to build a model that can identify potential customers more effectively.
+
+1.1 Challenges faced by Businesses:
+As I already witnessed in previous campaigns, an average of only 11% of people I have contacted signed up for a term deposit. As a result, most of the calling is done towards clients who convert the least. This wastes the call center, raises operating costs, and risks irritating clients with offers that are not valid on their purchases. The work I’m doing is aimed at helping the Bank reduce these wasted calls, increase the share of successful contacts, and ultimately improve the return on investment of its marketing campaigns.
+
+1.2 Dataset
+I will be using UCI Bank Marketing – full dataset (bank-full.csv) (Moro, Cortez and Rita, 2014) for this project. It has real campaign records of a Portuguese bank and it has both numerical and categorical features.
+
+Dataset : https://www.kaggle.com/datasets/jiraleelas/uci-bank-marketing-full-dataset(Jiralee, 2024)
+
+2. Install Libraries
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score, GridSearchCV
+from sklearn.compose import ColumnTransformer
+from imblearn.pipeline import Pipeline as ImbPipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, KBinsDiscretizer,LabelEncoder
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import RocCurveDisplay
+from imblearn.over_sampling import SMOTE
+from sklearn.metrics import f1_score, roc_auc_score, classification_report, confusion_matrix,ConfusionMatrixDisplay
+Python libraries were used for data preparation, visualisation, modelling, imbalance handling, and evaluation. In particular, scikit-learn(Pedregosa et al., 2011) supported preprocessing and model training, while imbalanced-learn was used to apply SMOTE (Chawla et al., 2002)during the modelling stage.
+
+3. Data Exploration
+3.1 Dataset Overview
+df = pd.read_csv("/content/bank-full.csv", sep=';')
+print(df['y'].value_counts(normalize=True))
+df.head()
+y
+no     0.883015
+yes    0.116985
+Name: proportion, dtype: float64
+age	job	marital	education	default	balance	housing	loan	contact	day	month	duration	campaign	pdays	previous	poutcome	y
+0	58	management	married	tertiary	no	2143	yes	no	unknown	5	may	261	1	-1	0	unknown	no
+1	44	technician	single	secondary	no	29	yes	no	unknown	5	may	151	1	-1	0	unknown	no
+2	33	entrepreneur	married	secondary	no	2	yes	yes	unknown	5	may	76	1	-1	0	unknown	no
+3	47	blue-collar	married	unknown	no	1506	yes	no	unknown	5	may	92	1	-1	0	unknown	no
+4	33	unknown	single	unknown	no	1	no	no	unknown	5	may	198	1	-1	0	unknown	no
+With its vast array of customer records, the dataset The dataset provides enough customer information to explore patterns in subscription behaviour.The analysis can concentrate on modeling rather than addressing missing data, as all variables are complete. This simplifies the workflow.(Moro, Cortez and Rita, 2014)
+
+3.2. Visualizing numeric features and target imbalance
+numeric_cols = df.select_dtypes(include="number").columns
+df[numeric_cols].hist(bins=20, layout=(2, 4), figsize=(14, 7))
+plt.tight_layout()
+plt.show()
+plt.figure(figsize=(6, 4))
+sns.countplot(x="y", data=df)
+plt.title("Target class distribution")
+plt.show()
+No description has been provided for this image
+No description has been provided for this image
+Numerical features such as duration and campaign are skewed, with many small values and a few large ones. The target variable is highly imbalanced, with only around 12% positive cases, which requires careful evaluation beyond accuracy.
+
+4.Feature Engineering and Data Preprocessing
+4.1 Feature engineering
+df["campaign_success"] = (df["campaign"] <= 5).astype(int)
+df["recent_contact"] = ((df["pdays"] <= 20) | (df["pdays"] == 999)).astype(int)
+df["age_band"] = pd.cut(df["age"], bins=[0, 35, 55, 100],
+                        labels=["young", "middle", "senior"])
+df["duration_per_age"] = df["duration"] / (df["age"] + 1)
+
+label_encoder = LabelEncoder()
+y = label_encoder.fit_transform(df["y"])
+X_fe = df.drop(columns=["y"])
+
+print("Feature matrix dimensions:", X_fe.shape)
+print("Share of positive class:", y.mean().round(3))
+Feature matrix dimensions: (45211, 20)
+Share of positive class: 0.117
+Using a ColumnTransformer, features were sorted into groups by type. We scaled the numerical features, encoded the categorical variables, and binned the selected variables to make them less skewed. To avoid data leakage, all transformations were fitted to the training data.
+4.2 Train–test split
+x_train, x_test, y_train, y_test = train_test_split(X_fe,y,test_size=0.2,random_state=40,stratify=y)
+
+print("Training set shape:", X_train.shape, "| Test set shape:", X_test.shape)
+print("Positive rate in train:", y_train.mean().round(3))
+print("Positive rate in test:", y_test.mean().round(3))
+Training set shape: (36168, 20) | Test set shape: (9043, 20)
+Positive rate in train: 0.117
+Positive rate in test: 0.117
+The train–test split is stratified so that both subsets reflect the original imbalance between yes and no. Performing the split before fitting any preprocessing or models helps to avoid data leakage and preserves the integrity of the test set.
+
+4.3 Preprocessing with ColumnTransformer
+numeric_feats = ["duration", "campaign", "pdays", "previous", "balance", "duration_per_age"]
+low_card_cat = ["marital","contact", "month", "poutcome", "campaign_success", "loan", "education","recent_contact","default", "age_band","housing"]
+high_card_cat = ["job"]
+binned_feats = ["age", "duration"]
+
+numeric_feats = [col for col in numeric_feats if col in X_train.columns]
+low_card_cat = [col for col in low_card_cat if col in X_train.columns]
+high_card_cat = [col for col in high_card_cat if col in X_train.columns]
+binned_feats = [col for col in binned_feats if col in X_train.columns]
+
+print("Numeric feature columns:", numeric_feats)
+print("Categorical feature columns:", low_card_cat + high_card_cat)
+print("Columns to be binned:", binned_feats)
+Numeric feature columns: ['duration', 'campaign', 'pdays', 'previous', 'balance', 'duration_per_age']
+Categorical feature columns: ['marital', 'contact', 'month', 'poutcome', 'campaign_success', 'loan', 'education', 'recent_contact', 'default', 'age_band', 'housing', 'job']
+Columns to be binned: ['age', 'duration']
+Features were grouped by type before preprocessing. To reduce skewness, numerical variables were scaled, and categorical variables were encoded, and age and duration binned. Only used columns that were found in the training set to ensure pipeline consistency.
+4.4 Preprocessing pipeline
+numeric_pipeline = Pipeline([("imputer", SimpleImputer(strategy="median")),("scaler", StandardScaler())])
+categorical_pipeline = Pipeline([("imputer", SimpleImputer(strategy="most_frequent")),("encoder", OneHotEncoder(drop="first",
+                                                                                                                handle_unknown="ignore"))])
+binned_pipeline = KBinsDiscretizer(n_bins=7,encode="ordinal",strategy="quantile")
+preprocessor = ColumnTransformer(
+    transformers=[
+        ("num", numeric_pipeline, numeric_feats),
+        ("cat", categorical_pipeline, low_card_cat + high_card_cat),
+        ("bin", binned_pipeline, binned_feats),
+    ],
+    remainder="drop")
+
+x_train_pro = preprocessor.fit_transform(X_train)
+x_test_pro = preprocessor.transform(X_test)
+
+print("Training shape (transformed):", x_train_pro.shape)
+print("Test shape(transformed):", x_test_pro.shape)
+Training shape (transformed): (36168, 47)
+Test shape(transformed): (9043, 47)
+To avoid values with larger scales dominating the model, the numerical features were scaled, and categorical variables were encoded to enable their us.
+Scaling was applied so that no feature disproportionately influences the model.The cleaned dataset consists of 36,168 rows in the training set and 9,043 rows in the testing dataset. Each of the rows contains 47 transformed features.
+5. Model Training and Hyperparameter Tuning
+5.1 Random Forest training with Cross‑validation
+strat_cv = StratifiedKFold(n_splits=7,shuffle=True,random_state=45)
+rf_base = RandomForestClassifier(random_state=40,n_jobs=-1,class_weight="balanced")
+param_grid = {"n_estimators": [200],"max_depth": [10]}
+
+grid_search = GridSearchCV(estimator=rf_base,param_grid=param_grid,cv=strat_cv,scoring="f1_macro",n_jobs=-1)
+grid_search.fit(x_train_proc, y_train)
+
+print("Best cross-validated F1:", grid_search.best_score_)
+print("Best hyperparameters:", grid_search.best_params_)
+
+rf_best = grid_search.best_estimator_.fit(x_train_proc, y_train)
+Best cross-validated F1: 0.7282997406296575
+Best hyperparameters: {'max_depth': 10, 'n_estimators': 200}
+We went with Random Forest (Padregosa et al., 2011) since it can take numeric and categorical data into account while capturing non-linear patterns too.Cross-validation tuning of hyperparameters was done with macro F1, with class_weight='balanced' to deal with class imbalance.
+The best model achieved a CV F1 of ~0.73 with 200 trees and a depth of 10 because further learning would not be able to take place and a case of overfitting would occur (Moro, Cortez and Rita, 2014).
+5.2 Imbalance handling: SMOTE + Random Forest
+smote_balancer = SMOTE(sampling_strategy="auto",k_neighbors=5,random_state=40)
+rf_smote_model = RandomForestClassifier(n_estimators=200,max_depth=10,random_state=40,n_jobs=-1)
+smote_rf_pipeline = ImbPipeline(steps=[("smote", smote_balancer),("rf", rf_smote_model),])
+
+cv_scores_smote = cross_val_score(smote_rf_pipeline,x_train_proc,y_train,cv=5,scoring="f1_macro",n_jobs=-1)
+print(
+    f"SMOTE + RF | mean F1_macro: {cv_scores_smote.mean():.4f} "
+    f"(± {2 * cv_scores_smote.std():.4f})"
+)
+smote_rf_pipeline.fit(X_train_proc, y_train)
+SMOTE + RF | mean F1_macro: 0.7425 (± 0.0070)
+
+Pipeline
+i
+
+SMOTE
+
+RandomForestClassifier
+?
+To address the issue of class imbalance, SMOTE employed Random Forest to create more minority samples (Chawla et al., 2002). The model’s ability to learn the cases of “Yes” improved. The model based on synthetic minority oversampling technique (SMOTE) shows marginally better macro F1, so it was selected for test data comparison.
+6. Model Assessment
+6.1 Evaluation Metrics
+threshold = 0.5
+print(f"Decision threshold: {threshold}\n")
+
+# Class-weighted Random Forest
+print("Class-weighted Random Forest")
+y_rf_predict = (rf_best.predict_proba(X_test_proc)[:, 1] >= threshold).astype(int)
+y_rf_prob = rf_best.predict_proba(X_test_proc)[:, 1]
+
+print(classification_report(y_test, y_rf_predict, target_names=["no", "yes"]))
+print(f"Accuracy(test): {accuracy_score(y_test, y_rf_pred):.2f}")
+print(f"F1 (macro)(test): {f1_score(y_test, y_rf_pred, average='macro'):.2f}")
+print(f"ROC-AUC(test): {roc_auc_score(y_test, y_rf_prob):.2f}")
+
+# SMOTE + Random Forest
+print("\nSMOTE + Random Forest")
+y_smote_predict = (smote_rf_pipeline.predict_proba(X_test_proc)[:, 1] >= threshold).astype(int)
+y_smote_proba = smote_rf_pipeline.predict_proba(X_test_proc)[:, 1]
+
+print(classification_report(y_test, y_smote_pred, target_names=["No", "Yes"]))
+print(f"Accuracy(test): {accuracy_score(y_test, y_smote_pred):.2f}")
+print(f"F1 (macro)(test): {f1_score(y_test, y_smote_pred, average='macro'):.2f}")
+print(f"ROC-AUC(test): {roc_auc_score(y_test, y_smote_proba):.2f}")
+Decision threshold: 0.5
+
+Class-weighted Random Forest
+              precision    recall  f1-score   support
+
+          no       0.98      0.84      0.90      7985
+         yes       0.42      0.85      0.56      1058
+
+    accuracy                           0.84      9043
+   macro avg       0.70      0.85      0.73      9043
+weighted avg       0.91      0.84      0.86      9043
+
+Accuracy(test): 0.84
+F1 (macro)(test): 0.73
+ROC-AUC(test): 0.92
+
+SMOTE + Random Forest
+              precision    recall  f1-score   support
+
+          No       0.97      0.87      0.92      7985
+         Yes       0.45      0.80      0.57      1058
+
+    accuracy                           0.86      9043
+   macro avg       0.71      0.83      0.74      9043
+weighted avg       0.91      0.86      0.88      9043
+
+Accuracy(test): 0.86
+F1 (macro)(test): 0.74
+ROC-AUC(test): 0.92
+The classification accuracy and other metrics of both the models were evaluated on the test set with a threshold of 0.5. Thus, we got precision, recall, F1 Score, accuracy, ROC-AUC, etc.
+
+In order to preserve the imbalance of classes, we applied stratified split along with splitting before preprocessing to avoid data leakage.
+
+6.2 ROC curve comparison
+plt.figure(figsize=(8, 5))
+
+RocCurveDisplay.from_estimator(rf_best,X_test_proc,y_test,name="Balanced Random Forest")
+RocCurveDisplay.from_estimator(smote_rf_pipeline,X_test_proc,y_test,name="SMOTE Enhanced RF")
+plt.plot([0, 1], [0, 1], linestyle="--", label="Baseline")
+
+plt.title("ROC Curve Comparison on Test Data")
+plt.legend()
+plt.tight_layout()
+plt.show()
+<Figure size 800x500 with 0 Axes>
+No description has been provided for this image
+No description has been provided for this image
+Both the class-weighted and SMOTE Random Forest models use similar features and settings, resulting in comparable customer rankings. (Pedregosa et al., 2011).
+The ROC curves demonstrate comparable performances with AUCs almost equal to about 0.92. The models differ a little from each other mainly due to the threshold chosen and not their ranking ability.
+6.3 Confusion Matrix
+y_pred_smote = smote_rf_pipeline.predict(x_test_proc)
+
+cm = confusion_matrix(y_test, y_pred_smote)
+
+plt.figure(figsize=(4, 4))
+sns.heatmap(cm,annot=True,fmt="d",xticklabels=["No", "Yes"],yticklabels=["No", "Yes"])
+
+plt.xlabel("Predicted Label")
+plt.ylabel("Actual Label")
+plt.title("Confusion Matrix for SMOTE-based Random Forest")
+plt.tight_layout()
+plt.show()
+No description has been provided for this image
+The model predicts most non-subscribers correctly and also identifies a large number of actual subscribers.However, it still produces some false positives and false negatives, which is expected in an imbalanced problem.
+This trade-off is acceptable because the goal is to identify potential subscribers, even if it results in some unnecessary calls.
+6.4 Prediction Acceptance Rate:
+A threshold is determined (such as calling clients who have a predicted P(yes) of at least 0.4), and acceptance rate is calculated for those selected. If that rate is much higher than the overall 11%, the model is targeting high probability customers.
+6.5 Why does Accuracy looks high?
+In this case only 11% or so of customers subscribed, therefore creating an extremely unbalanced classification problem, thus only assessing accuracy can be misleading, even a simple no prediction will do well.(Moro, Cortez and Rita, 2014)
+Effectiveness of this Model : Even so, the model performs well by detecting a large number of true subscribers while still performing well on the majority class, making it more useful than a simple baseline.
+6.6 Final Model Selection:
+The SMOTE + Random Forest model balances the outcomes well between the classes and enhance identification of potential subscribers. The bank can focus on high-probability customers, alter thresholds as per allocated budget, and enhance campaign effectiveness.
+
+## Why selected model is best?
+This model was chosen as it scored well on both classes with a higher macro F1 and a strong ROC-AUC. By limiting contacts to customers most likely to subscribe, it reduces dialling efforts and improves campaign results.
+
+7. Conclusion
+7.1 Business Recommendations
+Concentrate on making calls to customers who have a high likelihood of acceptance and avoid the callers with very low scores.
+Adjust that as needed. Incorporate the model in the campaign process to aid targeting with data.
+Within the CRM system, real-time scoring of customers can be executed through use of the tool.
+Define the decision threshold according to budget and call-centre capacity.
+7.2 Key Insights from the model:
+The subscription likelihood of some customers varies with their age, job, last contact, and duration of call. Moro, Cortez and Rita (2014) mention that the patterns improve targeting and success. In addition, it allows the bank to concentrate efforts on customers with a higher response likelihood.
+7.3 Learning Outcomes
+Utilizing SMOTE enhances the model’s capacity to detect “Yes” cases. Random Forest does a good job here as it can deal with mixed features. As positive cases are uncommon, metrics such as macro F1 and ROC-AUC allow for a more realistic assessment of performance than accuracy.
+7.4 Most Impacting Hyperparameters
+The amount of trees helps determine the stability of the model. More trees generally lead to better performance. By regulating the depth of the tree, the learning algorithm limits complexity to avoid overfitting.
+Employing 200 trees with a depth of 10 is a good combination in this case as it allows the model to learn useful patterns without being too complex.
+7.5 Most influential features
+rf_model = smote_rf_pipeline.named_steps.get("rf")
+
+importance_values = rf_model.feature_importances_
+all_features = preprocessor.get_feature_names_out()
+importance_df = pd.DataFrame({
+    "feature": all_features,
+    "importance": importance_values})
+top_features_df = importance_df.sort_values(by="importance", ascending=False).head(10)
+plt.figure(figsize=(8, 5))
+plt.barh(top_features_df["feature"], top_features_df["importance"])
+plt.gca().invert_yaxis()
+
+plt.xlabel("Importance Score")
+plt.title("Top 10 Important Features Influencing Subscription")
+plt.tight_layout()
+plt.show()
+No description has been provided for this image
+Call duration is a key factor, as longer conversations are more likely to lead to a positive response.
+Previous campaign outcomes also matter, since customers who showed interest before are more likely to subscribe again.
+Timing of contact plays a role too, with certain months performing better than others. Finally, customer characteristics such as age, balance, and loan status help indicate their likelihood and ability to invest.
+7.6 Limitations of the Model
+The model is based on data from past campaigns, so it might not work as well if customers change how they act over time. Some features, like call duration, are only available after the call starts, which makes it hard to use decision-making before the call. SMOTE adds synthetic samples, which might also have noise from the original data.
+Also, the model doesn't take into account the costs of running a business, so it should only be used as a decision support tool and not as a stand-alone system.
+References
+Chawla, N.V. et al. (2002) 'SMOTE: Synthetic Minority Over-sampling Technique', Journal of Artificial Intelligence Research, 16, pp. 321–357.
+
+Jiralee (2024) UCI Bank Marketing full dataset. Kaggle. Available at: https://www.kaggle.com/datasets/jiraleelas/uci-bank-marketing-full-dataset (Accessed: 25 March 2026).​
+
+Moro, S., Cortez, P. and Rita, P. (2014) 'A data-driven approach to predict the success of bank telemarketing', Decision Support Systems, 62, pp. 22–31. doi:10.1016/j.dss.2014.03.001.​
+
+Pedregosa, F. et al. (2011) 'Scikit-learn: Machine Learning in Python', Journal of Machine Learning Research, 12, pp. 2825–2830.​
+
+UCI Machine Learning Repository (2012) Bank Marketing Data Set. Available at: https://archive.ics.uci.edu/dataset/222/bank+marketing (Accessed: 25 March 2026).
